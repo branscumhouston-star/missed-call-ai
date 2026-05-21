@@ -1,0 +1,16 @@
+{
+  "name": "missed-call-ai",
+  "version": "1.0.0",
+  "description": "AI-powered SMS reply for missed calls — nail salons & self-care businesses",
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node --watch index.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.54.0",
+    "express": "^4.19.2",
+    "twilio": "^5.4.0"
+  }
+}
