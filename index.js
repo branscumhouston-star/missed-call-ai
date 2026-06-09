@@ -1,32 +1,30 @@
 // ============================================================
 //  AI Missed-Call SMS Reply — Webhook Server
-//  Stack: Twilio (phone) + Claude Haiku (AI) + Express (server)
+//  Stack: Sinch (phone) + Claude Haiku (AI) + Express (server)
 //  Deploy free to Railway: railway.app
 // ============================================================
 
 import express from "express";
-import twilio from "twilio";
 import Anthropic from "@anthropic-ai/sdk";
 
 const app = express();
-app.use(express.urlencoded({ extended: false })); // Twilio sends form-encoded bodies
+app.use(express.json());
+app.use(express.urlencoded({ extended: false }));
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
 // ── Salon config ─────────────────────────────────────────────
-// In production: store one config row per salon in a DB.
-// For the demo, just edit this object.
 const SALON_CONFIG = {
   name:        "Glam Nails & Spa",
-  phone:       process.env.TWILIO_SALON_PHONE, // your Twilio number e.g. +14175550123
+  phone:       process.env.SINCH_NUMBER, // your Sinch number +12085810360
   services:    "manicures, pedicures, gel, acrylics, waxing, and facials",
   hours:       "Monday–Saturday 9 AM–7 PM, Sunday 10 AM–5 PM",
-  bookingLink: "https://glamnauls.glossgenius.com", // or any booking URL
+  bookingLink: "https://glamnauls.glossgenius.com",
   address:     "123 Main St, Neosho MO 64850",
 };
 // ─────────────────────────────────────────────────────────────
 
-// Build the Claude prompt — keep it tight so Haiku is fast & cheap
+// Build the Claude prompt
 function buildPrompt(callerNumber) {
   return `You are a friendly receptionist for ${SALON_CONFIG.name}, a nail salon.
 A customer just called and no one could answer. Write a warm, professional SMS reply to send them automatically.
@@ -46,17 +44,53 @@ Rules:
 Caller's number: ${callerNumber}`;
 }
 
-// ── Main webhook — Twilio calls this on every missed call ─────
-app.post("/missed-call", async (req, res) => {
-  const callerNumber = req.body.From;       // who called
-  const toNumber     = req.body.To;         // your Twilio number (the salon's number)
+// Send SMS via Sinch Conversation API
+async function sendSinchSMS(to, message) {
+  const url = `https://us.conversation.api.sinch.com/v1/projects/${process.env.SINCH_PROJECT_ID}/messages:send`;
 
-  console.log(`📵 Missed call from ${callerNumber} → ${toNumber}`);
+  const body = {
+    app_id: process.env.SINCH_APP_ID,
+    recipient: { identified_by: { channel_identities: [{ channel: "SMS", identity: to }] } },
+    message: { text_message: { text: message } },
+    channel_priority_order: ["SMS"],
+  };
+
+  const credentials = Buffer.from(
+    `${process.env.SINCH_KEY_ID}:${process.env.SINCH_KEY_SECRET}`
+  ).toString("base64");
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Basic ${credentials}`,
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!response.ok) {
+    const err = await response.text();
+    throw new Error(`Sinch API error: ${err}`);
+  }
+
+  return response.json();
+}
+
+// ── Main webhook — Sinch calls this on every inbound call ─────
+app.post("/missed-call", async (req, res) => {
+  // Sinch sends caller info in the request body
+  const callerNumber =
+    req.body.from ||
+    req.body.cli ||
+    req.body.From ||
+    req.body.caller ||
+    "Unknown";
+
+  console.log(`📵 Missed call from ${callerNumber}`);
 
   let smsBody;
 
   try {
-    // Ask Claude Haiku to write the reply
     const aiResponse = await anthropic.messages.create({
       model:      "claude-haiku-4-5",
       max_tokens: 200,
@@ -66,36 +100,23 @@ app.post("/missed-call", async (req, res) => {
     smsBody = aiResponse.content[0].text.trim();
     console.log(`🤖 Claude reply: ${smsBody}`);
   } catch (err) {
-    // Fallback message if the API call fails — never leave a caller hanging
     console.error("Claude API error:", err.message);
     smsBody = `Hi! Sorry we missed you at ${SALON_CONFIG.name}. Book online: ${SALON_CONFIG.bookingLink} or call us back during business hours.`;
   }
 
-  // Send the SMS via Twilio
+  // Send the SMS via Sinch
   try {
-    const client = twilio(
-      process.env.TWILIO_ACCOUNT_SID,
-      process.env.TWILIO_AUTH_TOKEN
-    );
-
-    await client.messages.create({
-      body: smsBody,
-      from: toNumber,      // your Twilio number
-      to:   callerNumber,  // the person who called
-    });
-
+    await sendSinchSMS(callerNumber, smsBody);
     console.log(`✅ SMS sent to ${callerNumber}`);
   } catch (err) {
-    console.error("Twilio send error:", err.message);
+    console.error("Sinch send error:", err.message);
   }
 
-  // Twilio expects a TwiML response (even if empty) — this silently ends the call
-  res.set("Content-Type", "text/xml");
-  res.send(`<Response></Response>`);
+  res.json({ status: "ok" });
 });
 
-// Health-check endpoint (Railway uses this to verify the app is up)
-app.get("/", (req, res) => res.send("✅ AI Missed-Call SMS is running."));
+// Health-check
+app.get("/", (req, res) => res.send("✅ NeverMiss AI is running with Sinch."));
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`🚀 Server listening on port ${PORT}`));
