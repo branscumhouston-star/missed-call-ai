@@ -59,7 +59,6 @@ async function sendSinchSMS(to, message) {
   ).toString("base64");
 
   console.log(`📤 Sending SMS to ${to} via Sinch...`);
-  console.log(`📦 Request body: ${JSON.stringify(body)}`);
 
   const response = await fetch(url, {
     method: "POST",
@@ -81,24 +80,45 @@ async function sendSinchSMS(to, message) {
   return JSON.parse(responseText);
 }
 
-// ── Main webhook ─────────────────────────────────────────────
+// ── Main webhook — handles Sinch ICE event (incoming call) ───
 app.post("/missed-call", async (req, res) => {
   console.log(`📥 Full request body: ${JSON.stringify(req.body)}`);
 
-  const rawNumber =
-    req.body.from ||
-    req.body.cli ||
-    req.body.From ||
-    req.body.caller ||
-    "Unknown";
+  const event = req.body.event;
 
-  // Ensure + prefix for Sinch
-  const callerNumber = rawNumber !== "Unknown" && !rawNumber.startsWith("+")
-    ? `+${rawNumber}`
-    : rawNumber;
+  // Handle the ICE event — this is the incoming call
+  // We tell Sinch to hang up, then send the SMS
+  if (event === "ice") {
+    const rawNumber = req.body.cli || "Unknown";
+    const callerNumber = rawNumber !== "Unknown" && !rawNumber.startsWith("+")
+      ? `+${rawNumber}`
+      : rawNumber;
 
-  console.log(`📵 Missed call from ${callerNumber}`);
+    console.log(`📵 Missed call from ${callerNumber}`);
 
+    // Send SMS in background — don't await so we respond to Sinch fast
+    sendSMSInBackground(callerNumber);
+
+    // Respond to Sinch with SVAML to hang up the call gracefully
+    return res.json({
+      instructions: [],
+      action: {
+        name: "hangup"
+      }
+    });
+  }
+
+  // Handle DICE event (call ended) — just acknowledge
+  if (event === "dice") {
+    return res.json({});
+  }
+
+  // Default response
+  res.json({});
+});
+
+// Send SMS in background without blocking the Sinch response
+async function sendSMSInBackground(callerNumber) {
   let smsBody;
 
   try {
@@ -115,16 +135,13 @@ app.post("/missed-call", async (req, res) => {
     smsBody = `Hi! Sorry we missed you at ${SALON_CONFIG.name}. Book online: ${SALON_CONFIG.bookingLink} or call us back during business hours.`;
   }
 
-  // Send the SMS via Sinch
   try {
     await sendSinchSMS(callerNumber, smsBody);
     console.log(`✅ SMS sent to ${callerNumber}`);
   } catch (err) {
     console.error("Sinch send error:", err.message);
   }
-
-  res.json({ status: "ok" });
-});
+}
 
 // Health-check
 app.get("/", (req, res) => res.send("✅ NeverMiss AI is running with Sinch."));
