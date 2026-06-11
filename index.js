@@ -79,12 +79,17 @@ async function sendSinchSMS(to, message) {
 // ── Main webhook — Sinch calls this on every inbound call ─────
 app.post("/missed-call", async (req, res) => {
   // Sinch sends caller info in the request body
-  const callerNumber =
+  const rawNumber =
     req.body.from ||
     req.body.cli ||
     req.body.From ||
     req.body.caller ||
     "Unknown";
+
+  // Make sure number has + prefix so Sinch can deliver the SMS
+  const callerNumber = rawNumber !== "Unknown" && !rawNumber.startsWith("+")
+    ? `+${rawNumber}`
+    : rawNumber;
 
   console.log(`📵 Missed call from ${callerNumber}`);
 
