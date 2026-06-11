@@ -16,13 +16,12 @@ const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 // ── Salon config ─────────────────────────────────────────────
 const SALON_CONFIG = {
   name:        "Glam Nails & Spa",
-  phone:       process.env.SINCH_NUMBER, // your Sinch number +12085810360
+  phone:       process.env.SINCH_NUMBER,
   services:    "manicures, pedicures, gel, acrylics, waxing, and facials",
   hours:       "Monday–Saturday 9 AM–7 PM, Sunday 10 AM–5 PM",
   bookingLink: "https://glamnauls.glossgenius.com",
   address:     "123 Main St, Neosho MO 64850",
 };
-// ─────────────────────────────────────────────────────────────
 
 // Build the Claude prompt
 function buildPrompt(callerNumber) {
@@ -59,6 +58,9 @@ async function sendSinchSMS(to, message) {
     `${process.env.SINCH_KEY_ID}:${process.env.SINCH_KEY_SECRET}`
   ).toString("base64");
 
+  console.log(`📤 Sending SMS to ${to} via Sinch...`);
+  console.log(`📦 Request body: ${JSON.stringify(body)}`);
+
   const response = await fetch(url, {
     method: "POST",
     headers: {
@@ -68,17 +70,21 @@ async function sendSinchSMS(to, message) {
     body: JSON.stringify(body),
   });
 
+  const responseText = await response.text();
+  console.log(`📨 Sinch response status: ${response.status}`);
+  console.log(`📨 Sinch response body: ${responseText}`);
+
   if (!response.ok) {
-    const err = await response.text();
-    throw new Error(`Sinch API error: ${err}`);
+    throw new Error(`Sinch API error ${response.status}: ${responseText}`);
   }
 
-  return response.json();
+  return JSON.parse(responseText);
 }
 
-// ── Main webhook — Sinch calls this on every inbound call ─────
+// ── Main webhook ─────────────────────────────────────────────
 app.post("/missed-call", async (req, res) => {
-  // Sinch sends caller info in the request body
+  console.log(`📥 Full request body: ${JSON.stringify(req.body)}`);
+
   const rawNumber =
     req.body.from ||
     req.body.cli ||
@@ -86,7 +92,7 @@ app.post("/missed-call", async (req, res) => {
     req.body.caller ||
     "Unknown";
 
-  // Make sure number has + prefix so Sinch can deliver the SMS
+  // Ensure + prefix for Sinch
   const callerNumber = rawNumber !== "Unknown" && !rawNumber.startsWith("+")
     ? `+${rawNumber}`
     : rawNumber;
