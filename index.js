@@ -43,22 +43,21 @@ Rules:
 Caller's number: ${callerNumber}`;
 }
 
-// Send SMS via Sinch Conversation API
+// Send SMS via Sinch SMS API (using Service Plan ID)
 async function sendSinchSMS(to, message) {
-  const url = `https://us.conversation.api.sinch.com/v1/projects/${process.env.SINCH_PROJECT_ID}/messages:send`;
+  const url = `https://us.sms.api.sinch.com/xms/v1/${process.env.SINCH_SERVICE_PLAN_ID}/batches`;
 
   const body = {
-    app_id: process.env.SINCH_APP_ID,
-    recipient: { identified_by: { channel_identities: [{ channel: "SMS", identity: to }] } },
-    message: { text_message: { text: message } },
-    channel_priority_order: ["SMS"],
+    from: process.env.SINCH_NUMBER,
+    to: [to],
+    body: message,
   };
 
   const credentials = Buffer.from(
-    `${process.env.SINCH_KEY_ID}:${process.env.SINCH_KEY_SECRET}`
+    `${process.env.SINCH_SMS_KEY_ID}:${process.env.SINCH_SMS_KEY_SECRET}`
   ).toString("base64");
 
-  console.log(`📤 Sending SMS to ${to} via Sinch...`);
+  console.log(`📤 Sending SMS to ${to} via Sinch SMS API...`);
 
   const response = await fetch(url, {
     method: "POST",
@@ -70,11 +69,11 @@ async function sendSinchSMS(to, message) {
   });
 
   const responseText = await response.text();
-  console.log(`📨 Sinch response status: ${response.status}`);
-  console.log(`📨 Sinch response body: ${responseText}`);
+  console.log(`📨 Sinch SMS API response status: ${response.status}`);
+  console.log(`📨 Sinch SMS API response body: ${responseText}`);
 
   if (!response.ok) {
-    throw new Error(`Sinch API error ${response.status}: ${responseText}`);
+    throw new Error(`Sinch SMS API error ${response.status}: ${responseText}`);
   }
 
   return JSON.parse(responseText);
